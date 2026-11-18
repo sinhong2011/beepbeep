@@ -26,7 +26,8 @@ export function RollingNumber(props: { text: string; size: number; class?: strin
   // Keyed from the right, so the ones place stays the ones place as the number grows.
   const chars = () => [...props.text].map((c, i, all) => ({ c, key: all.length - i }));
   return (
-    <View class="flex-row items-end" accessibilityLabel={props.text}>
+    // One element for assistive technologies, read as the number; the digit columns stay hidden.
+    <View class="flex-row items-end" accessible accessibilityLabel={props.text}>
       <Each of={chars()} key={(c) => c.key}>
         {(ch) => (
           <If
@@ -116,7 +117,8 @@ export function ConfirmBin(props: {
     unbind = keymap.bind("escape", close);
   };
   return (
-    <View class="flex-row items-center gap-1">
+    // The confirm panel floats above the bin, so it never pushes the buttons beside it.
+    <View class="relative">
       <Button
         accessibilityLabel={props.label}
         tooltip={open() ? "Keep it" : props.label}
@@ -137,16 +139,18 @@ export function ConfirmBin(props: {
         </View>
       </Button>
       <If when={open()}>
-        <ConfirmPanel onConfirm={() => { close(); props.onConfirm(); }} onCancel={close} extra={props.extra ?? null} />
+        <View class="absolute right-0 z-10" style={{ bottom: s + 6 }}>
+          <ConfirmPanel onConfirm={() => { close(); props.onConfirm(); }} onCancel={close} extra={props.extra ?? null} />
+        </View>
       </If>
     </View>
   );
 }
 
 function ConfirmPanel(props: { onConfirm: () => void; onCancel: () => void; extra: { label: string; onPress: () => void } | null }) {
-  const m = createMotion({ enter: { duration: motion.base, easing: "easeOut", keyframes: { opacity: [0, 1], translateX: [-8, 0], scale: [0.94, 1] } } });
+  const m = createMotion({ enter: { duration: motion.base, easing: "easeOut", keyframes: { opacity: [0, 1], translateY: [6, 0], scale: [0.94, 1] } } });
   return (
-    <View class="flex-row items-center gap-1 rounded-[10px] border border-line bg-surface-raised p-[3px] shadow-sm" style={m.style}>
+    <View class="origin-bottom-right flex-row items-center gap-1 rounded-[10px] border border-line bg-surface-raised p-[3px] shadow-lg" style={m.style}>
       <Button accessibilityLabel="Remove from list" tooltip="Remove from list" onPress={props.onConfirm} class={`size-7 items-center justify-center rounded-[7px] bg-destructive ${press}`}>
         <Glyph name="check" size={15} iconClass="text-white" />
       </Button>
