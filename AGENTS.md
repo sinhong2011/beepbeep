@@ -26,6 +26,10 @@ cd app && nsh run --target macos        # dev host; TSX edits hot-reload, Rust e
 cd app && nsh package App.tsx --target macos   # .nsh/out/BeepBeep.app
 ```
 
+CI (`.github/workflows/ci.yml`) runs the engine tests, the fault suite, `nsh check`, `nsh test` and
+`nsh package` on macOS, Linux and Windows. Set `BEEPBEEP_DATA_DIR` for any local run that should not
+touch your own queue.
+
 ## Rules
 
 - **Engine changes need a test and a fault-test run.** The engine must keep the file byte-identical

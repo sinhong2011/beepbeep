@@ -12,3 +12,4 @@ path = "src/main.rs"
 beep-core = { path = "../beep-core" }
 tokio.workspace = true
 serde_json.workspace = true
+trash.workspace = true

@@ -19,11 +19,10 @@ uuid.workspace = true
 log.workspace = true
 mime_guess.workspace = true
 percent-encoding.workspace = true
+fs4.workspace = true
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util"] }
 url.workspace = true
 serde_json.workspace = true
 
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"

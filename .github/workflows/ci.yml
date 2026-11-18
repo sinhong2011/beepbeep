@@ -1,0 +1,88 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Builds and tests BeepBeep on macOS, Linux and Windows, and packages the desktop app for each.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Tests never touch a real user's queue.
+  BEEPBEEP_DATA_DIR: ${{ github.workspace }}/.ci-data
+
+jobs:
+  engine:
+    name: Engine and CLI (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Unit and service tests
+        run: cargo test -p beep-core
+      - name: Build the CLI
+        run: cargo build -p beep-cli
+      - name: Engine under injected faults
+        if: runner.os != 'Windows'
+        run: bash scripts/fault-test.sh "$RUNNER_TEMP/fault"
+
+  app:
+    name: Desktop app (${{ matrix.target }})
+    needs: engine
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-14, target: macos }
+          - { os: ubuntu-24.04, target: linux }
+          - { os: windows-2022, target: windows }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: app
+
+      - name: Install NSH (macOS)
+        if: runner.os == 'macOS'
+        run: brew install longbridge/tap/nsh
+      - name: Install NSH and GTK (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-4-dev clang libwebkitgtk-6.0-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev xvfb
+          curl -fsSL https://nsh.dev/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Install NSH (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          irm https://nsh.dev/install.ps1 | iex
+          "$env:LOCALAPPDATA\nsh\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Type-check the TSX against the Rust exports
+        run: nsh check
+      - name: Headless UI tests
+        run: nsh test
+      - name: Package
+        run: nsh package App.tsx --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: BeepBeep-${{ matrix.target }}
+          path: app/.nsh/out/
+          if-no-files-found: error

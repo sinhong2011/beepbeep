@@ -4,8 +4,9 @@
 //! as a client. So downloads an AI assistant adds appear live in the window, and only one process ever
 //! writes the queue's files.
 //!
-//! The socket is `$TMPDIR/beepbeep-<hash of the data folder>.sock`, mode 0600 in the user's private
-//! temporary folder: local, no network port, reachable only by the same user. The protocol is one JSON request per line,
+//! On macOS and Linux it is a Unix socket, `$TMPDIR/beepbeep-<hash of the data folder>.sock`, mode
+//! 0600 in the user's private temporary folder. On Windows it is a named pipe,
+//! `\\.\pipe\beepbeep-<hash>`, that refuses remote clients. Either way: local only, no network port. The protocol is one JSON request per line,
 //! `{"method": "...", "params": {...}}`, answered by one line `{"ok": ...}` or `{"error": "..."}`.
 
 use crate::domain::DownloadTask;
@@ -77,7 +78,7 @@ pub struct Service {
 
 enum Inner {
     Local(Manager),
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     Remote(client::Client),
 }
 
@@ -85,17 +86,29 @@ enum Inner {
 /// user on macOS and Linux) under a short name derived from `dir`: socket paths are limited to about
 /// 104 bytes, which a data folder deep in the file system can exceed.
 pub fn socket_path(dir: &Path) -> PathBuf {
+    let name = endpoint_name(dir);
+    #[cfg(windows)]
+    {
+        PathBuf::from(format!(r"\\.\pipe\{name}"))
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::temp_dir().join(format!("{name}.sock"))
+    }
+}
+
+fn endpoint_name(dir: &Path) -> String {
     // FNV-1a: stable across builds and platforms, unlike `DefaultHasher`.
     let mut h: u64 = 0xcbf29ce484222325;
     for b in dir.as_os_str().as_encoded_bytes() {
         h = (h ^ *b as u64).wrapping_mul(0x100000001b3);
     }
-    std::env::temp_dir().join(format!("beepbeep-{:012x}.sock", h & 0xffff_ffff_ffff))
+    format!("beepbeep-{:012x}", h & 0xffff_ffff_ffff)
 }
 
 fn own(dir: &Path, settings: Option<Settings>) -> Manager {
     let m = Manager::new(Store::at(dir.to_owned()), settings);
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     server::serve(&m, &socket_path(dir));
     m
 }
@@ -112,12 +125,12 @@ impl Service {
 
     /// Attaches to a running owner of `dir`'s queue; `None` when no BeepBeep process owns it.
     pub fn connect(dir: &Path) -> Option<Service> {
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             let c = client::Client::connect(&socket_path(dir))?;
             Some(Service { dir: Some(dir.to_owned()), inner: std::sync::RwLock::new(Inner::Remote(c)) })
         }
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             let _ = dir;
             None
@@ -132,13 +145,13 @@ impl Service {
     pub fn role(&self) -> Role {
         match &*self.inner.read().unwrap() {
             Inner::Local(_) => Role::Owner,
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             Inner::Remote(_) => Role::Client,
         }
     }
 
     /// The owner went away: attach to whoever owns the queue now, or own it here.
-    #[cfg(unix)]
+    #[cfg(any(unix, windows))]
     fn take_over(&self) {
         let Some(dir) = &self.dir else { return };
         let mut inner = self.inner.write().unwrap();
@@ -157,7 +170,7 @@ impl Service {
     fn with_local<R>(&self, f: impl FnOnce(&Manager) -> R) -> Option<R> {
         match &*self.inner.read().unwrap() {
             Inner::Local(m) => Some(f(m)),
-            #[cfg(unix)]
+            #[cfg(any(unix, windows))]
             Inner::Remote(_) => None,
         }
     }
@@ -166,14 +179,14 @@ impl Service {
         for _ in 0..2 {
             let answer = match &*self.inner.read().unwrap() {
                 Inner::Local(m) => return dispatch(m, method, &params).unwrap_or(Value::Null),
-                #[cfg(unix)]
+                #[cfg(any(unix, windows))]
                 Inner::Remote(c) => c.call(method, params.clone()),
             };
             match answer {
                 Some(v) => return v,
-                #[cfg(unix)]
+                #[cfg(any(unix, windows))]
                 None => self.take_over(),
-                #[cfg(not(unix))]
+                #[cfg(not(any(unix, windows)))]
                 None => return Value::Null,
             }
         }
@@ -302,21 +315,37 @@ fn dispatch(m: &Manager, method: &str, p: &Value) -> Option<Value> {
     })
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod server {
     use super::dispatch;
     use crate::manager::Manager;
     use serde_json::{Value, json};
-    use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 
-    /// Serves `m` on `sock` from the manager's own runtime.
-    pub(super) fn serve(m: &Manager, sock: &Path) {
-        let _ = std::fs::remove_file(sock); // a stale socket from a crash: nobody answered on it
-        if let Some(dir) = sock.parent() {
-            let _ = std::fs::create_dir_all(dir);
+    /// Answers one connection's requests, line by line.
+    async fn answer<S: AsyncRead + AsyncWrite + Unpin>(m: Manager, stream: S) {
+        let (r, mut w) = tokio::io::split(stream);
+        let mut lines = BufReader::new(r).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let reply = match serde_json::from_str::<Value>(&line) {
+                Ok(req) => match dispatch(&m, req["method"].as_str().unwrap_or(""), &req["params"]) {
+                    Some(v) => json!({ "ok": v }),
+                    None => json!({ "error": "bad request" }),
+                },
+                Err(e) => json!({ "error": e.to_string() }),
+            };
+            if w.write_all(format!("{reply}\n").as_bytes()).await.is_err() {
+                break;
+            }
         }
+    }
+
+    /// Serves `m` on `endpoint` from the manager's own runtime.
+    #[cfg(unix)]
+    pub(super) fn serve(m: &Manager, sock: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::remove_file(sock); // a stale socket from a crash: nobody answered on it
         let listener = match std::os::unix::net::UnixListener::bind(sock) {
             Ok(l) => l,
             Err(e) => {
@@ -331,45 +360,64 @@ mod server {
             let Ok(listener) = tokio::net::UnixListener::from_std(listener) else { return };
             loop {
                 let Ok((stream, _)) = listener.accept().await else { continue };
-                let m = m.clone();
-                tokio::spawn(async move {
-                    let (r, mut w) = stream.into_split();
-                    let mut lines = BufReader::new(r).lines();
-                    while let Ok(Some(line)) = lines.next_line().await {
-                        let reply = match serde_json::from_str::<Value>(&line) {
-                            Ok(req) => match dispatch(&m, req["method"].as_str().unwrap_or(""), &req["params"]) {
-                                Some(v) => json!({ "ok": v }),
-                                None => json!({ "error": "bad request" }),
-                            },
-                            Err(e) => json!({ "error": e.to_string() }),
-                        };
-                        if w.write_all(format!("{reply}\n").as_bytes()).await.is_err() {
-                            break;
-                        }
+                tokio::spawn(answer(m.clone(), stream));
+            }
+        });
+    }
+
+    /// Serves `m` on a named pipe: one pipe instance per client, the next made before the last is handed off.
+    #[cfg(windows)]
+    pub(super) fn serve(m: &Manager, pipe: &Path) {
+        use tokio::net::windows::named_pipe::ServerOptions;
+        let name = pipe.as_os_str().to_owned();
+        let m = m.clone();
+        m.clone().spawn(async move {
+            let mut first = true;
+            loop {
+                let server = match ServerOptions::new().first_pipe_instance(first).reject_remote_clients(true).create(&name) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        log::warn!("control pipe unavailable ({e}); this queue stays private to this process");
+                        return;
                     }
-                });
+                };
+                first = false;
+                if server.connect().await.is_ok() {
+                    tokio::spawn(answer(m.clone(), server));
+                }
             }
         });
     }
 }
 
-#[cfg(unix)]
+#[cfg(any(unix, windows))]
 mod client {
     use serde_json::{Value, json};
     use std::io::{BufRead, BufReader, Write};
-    use std::os::unix::net::UnixStream;
+    #[cfg(unix)]
+    use std::os::unix::net::UnixStream as Stream;
+    #[cfg(windows)]
+    use std::fs::File as Stream;
     use std::path::{Path, PathBuf};
     use std::sync::Mutex;
+    #[cfg(unix)]
     use std::time::Duration;
 
     pub(super) struct Client {
         path: PathBuf,
-        conn: Mutex<Option<(UnixStream, BufReader<UnixStream>)>>,
+        conn: Mutex<Option<(Stream, BufReader<Stream>)>>,
     }
 
-    fn open(path: &Path) -> Option<(UnixStream, BufReader<UnixStream>)> {
-        let s = UnixStream::connect(path).ok()?;
-        s.set_read_timeout(Some(Duration::from_secs(10))).ok()?;
+    fn open(path: &Path) -> Option<(Stream, BufReader<Stream>)> {
+        #[cfg(unix)]
+        let s = {
+            let s = Stream::connect(path).ok()?;
+            s.set_read_timeout(Some(Duration::from_secs(10))).ok()?;
+            s
+        };
+        // A named pipe opens like a file; the owner answers each line it reads.
+        #[cfg(windows)]
+        let s = std::fs::OpenOptions::new().read(true).write(true).open(path).ok()?;
         let r = BufReader::new(s.try_clone().ok()?);
         Some((s, r))
     }

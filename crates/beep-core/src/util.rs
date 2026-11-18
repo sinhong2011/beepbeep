@@ -172,24 +172,10 @@ pub fn unique_path(dir: &Path, name: &str, reserved: &HashSet<String>, check_par
     }
 }
 
-/// Free bytes on the volume holding `dir`.
+/// Free bytes on the volume holding `dir` (or its nearest existing parent): macOS, Linux and Windows.
 pub fn free_space(dir: &Path) -> Option<u64> {
-    #[cfg(unix)]
-    {
-        use std::ffi::CString;
-        use std::os::unix::ffi::OsStrExt;
-        let c = CString::new(dir.as_os_str().as_bytes()).ok()?;
-        let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
-        if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
-            return None;
-        }
-        Some(st.f_bavail as u64 * st.f_frsize as u64)
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = dir;
-        None
-    }
+    let existing = dir.ancestors().find(|p| p.exists())?;
+    fs4::available_space(existing).ok()
 }
 
 /// Default download folder: ~/Downloads/BeepBeep.

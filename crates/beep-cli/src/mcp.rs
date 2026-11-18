@@ -242,16 +242,8 @@ fn call(m: &Service, rt: &tokio::runtime::Runtime, name: &str, a: &Value) -> Res
     }
 }
 
-/// Moves a file to the Trash (macOS Finder via osascript; elsewhere it is deleted only on request).
+/// Moves a file to the Trash (macOS), the Recycle Bin (Windows) or the desktop's trash (Linux);
+/// never deletes it outright.
 fn trash(p: &std::path::Path) -> Result<(), String> {
-    #[cfg(target_os = "macos")]
-    {
-        let script = format!("tell application \"Finder\" to delete POSIX file \"{}\"", p.display().to_string().replace('"', "\\\""));
-        let ok = std::process::Command::new("osascript").args(["-e", &script]).output().map(|o| o.status.success()).unwrap_or(false);
-        if ok { Ok(()) } else { Err(format!("couldn't move {} to the Trash", p.display())) }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        std::fs::remove_file(p).map_err(|e| e.to_string())
-    }
+    trash::delete(p).map_err(|e| format!("couldn't move {} to the Trash: {e}", p.display()))
 }

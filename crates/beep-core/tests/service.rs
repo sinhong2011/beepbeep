@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
-#![cfg(unix)]
+#![cfg(any(unix, windows))]
 use beep_core::{Role, Service, Settings};
 
 #[test]
@@ -32,4 +32,10 @@ fn a_second_process_attaches_to_the_owner_and_shares_its_queue() {
     let v = client.snapshot().version;
     assert!(client.snapshot_since(v).is_none());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn free_space_is_known_on_every_desktop() {
+    let free = beep_core::util::free_space(&std::env::temp_dir().join("not-there-yet/deeper")).unwrap();
+    assert!(free > 0);
 }

@@ -11,7 +11,7 @@ edition = "2024"
 license = "AGPL-3.0-or-later"
 
 [workspace.dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "process", "io-util", "signal"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "fs", "process", "io-util", "signal", "net"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json", "gzip"] }
 futures-util = "0.3"
 serde = { version = "1", features = ["derive"] }
@@ -24,6 +24,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 log = "0.4"
 mime_guess = "2"
 percent-encoding = "2"
+fs4 = { version = "1", features = ["sync"] }
+trash = "5"
 
 # Hashing and HTTP are unusably slow unoptimized; keep our own crates debuggable.
 [profile.dev.package."*"]
