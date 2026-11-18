@@ -1,0 +1,6 @@
+# Build output
+/target/
+/app/target/
+# NSH-generated (types, bundles, packaged apps); `nsh check` recreates it
+/app/.nsh/
+.DS_Store

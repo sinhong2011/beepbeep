@@ -1,0 +1,29 @@
+[package]
+name = "beep-core"
+description = "BeepBeep download engine: segmented HTTP, media resolvers (X, Threads, Instagram, yt-dlp), queue and store."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tokio.workspace = true
+reqwest.workspace = true
+futures-util.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+regex.workspace = true
+sha2.workspace = true
+url.workspace = true
+dirs.workspace = true
+uuid.workspace = true
+log.workspace = true
+mime_guess.workspace = true
+percent-encoding.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+url.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

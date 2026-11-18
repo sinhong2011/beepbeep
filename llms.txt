@@ -1,0 +1,17 @@
+# BeepBeep
+
+> A desktop download manager (NSH, Rust + TSX) with segmented, resumable HTTP(S) downloads and video downloads from X, Threads and Instagram post links. AI assistants can drive it through an MCP server (`beep mcp`) or the CLI's `--json` output.
+
+## Use it from an AI assistant
+
+- MCP server: run `beep mcp [-o DOWNLOAD_DIR] [--state STATE_DIR]` over stdio. Tools: add_download(urls[], quality?), list_downloads(filter?, limit?), get_download(id), pause_download(id), resume_download(id), remove_download(id, delete_file?) [destructive], resolve_link(url), get_status().
+- CLI: `beep get <url>... --json`, `beep list --json`, `beep resolve <url> --json`, `beep probe <url> --json`.
+- Accepted links: direct http(s) files; x.com / twitter.com `/status/<id>`; threads.net / threads.com `/@user/post/<code>`; instagram.com `/p/`, `/reel/`, `/reels/`, `/tv/`.
+- Quality: best, 1080, 720, 480, audio (the highest rendition at or under the cap).
+- Public posts need no account. Posts that need a login use yt-dlp with the user's chosen browser cookies; BeepBeep never bypasses DRM, paywalls or private accounts.
+
+## Docs
+
+- [AGENTS.md](AGENTS.md): repository layout, commands and rules for coding agents
+- [docs/AUDIT.md](docs/AUDIT.md): audit of the product plan and the decisions taken
+- [docs/DESIGN.md](docs/DESIGN.md): the desktop UI, its tokens and its motion inventory

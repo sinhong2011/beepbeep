@@ -1,0 +1,14 @@
+[package]
+name = "beep-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "beep"
+path = "src/main.rs"
+
+[dependencies]
+beep-core = { path = "../beep-core" }
+tokio.workspace = true
+serde_json.workspace = true

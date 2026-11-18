@@ -1,0 +1,15 @@
+{
+  "name": "BeepBeep",
+  "id": "dev.beepbeep.app",
+  "version": "1.0.0",
+  "build": 1,
+  "rust": ".",
+  "theme": "theme.json",
+  "appearance": "system",
+  "icon": {
+    "macos": "assets/icon/icon-macos.png",
+    "windows": "assets/icon/icon.png",
+    "linux": "assets/icon/icon.png",
+    "web": "assets/icon/icon.png"
+  }
+}
