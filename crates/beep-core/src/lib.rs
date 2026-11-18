@@ -6,9 +6,11 @@ pub mod domain;
 pub mod engine;
 pub mod manager;
 pub mod providers;
+pub mod service;
 pub mod settings;
 pub mod util;
 
 pub use domain::*;
 pub use manager::{Event, Manager, Snapshot, Store, default_store, is_media_link};
+pub use service::{Role, Service};
 pub use settings::{CookieBrowser, Quality, Settings};

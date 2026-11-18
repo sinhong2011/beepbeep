@@ -9,7 +9,7 @@ mod glyph;
 pub use glyph::{Glyph, GlyphProps};
 
 use beep_core::util::{fmt_bytes, fmt_duration, fmt_eta, fmt_speed, tilde};
-use beep_core::{DownloadTask, Event, Manager, Quality, TaskStatus, providers, util};
+use beep_core::{DownloadTask, Event, Quality, Service, TaskStatus, providers, util};
 use nsh_core::prelude::*;
 use serde::Serialize;
 use std::sync::OnceLock;
@@ -21,9 +21,11 @@ fn native(registry: &mut Registry) {
     registry.register::<Glyph>().module::<Engine>();
 }
 
-fn manager() -> &'static Manager {
-    static M: OnceLock<Manager> = OnceLock::new();
-    M.get_or_init(|| Manager::new(beep_core::default_store(), None))
+/// The user's one queue: owned here when BeepBeep starts first, else attached to the process that owns
+/// it (another BeepBeep, or `beep mcp`), so downloads added anywhere show up here live.
+fn manager() -> &'static Service {
+    static M: OnceLock<Service> = OnceLock::new();
+    M.get_or_init(|| Service::connect_or_start(util::data_dir(), None))
 }
 
 fn uuid(id: &str) -> Option<Uuid> {
@@ -291,35 +293,7 @@ impl Engine {
 
     /// Changes one setting: `key` is a field of the snapshot's settings, `value` its new value as text.
     pub fn set_setting(key: String, value: String) -> Result<(), String> {
-        let num = || value.parse::<f64>().map_err(|_| format!("not a number: {value}"));
-        let flag = || Ok::<bool, String>(value == "true");
-        let mut err: Option<String> = None;
-        let mut apply = |f: &mut beep_core::Settings| -> Result<(), String> {
-            match key.as_str() {
-                "folder" => f.download_dir = value.clone().into(),
-                "maxConcurrent" => f.max_concurrent = num()?.clamp(1.0, 10.0) as usize,
-                "connections" => f.connections_per_task = num()?.clamp(1.0, 32.0) as usize,
-                "speedLimit" => f.speed_limit = num()?.max(0.0) as u64,
-                "notify" => f.notify = flag()?,
-                "verifySha256" => f.verify_sha256 = flag()?,
-                "categoryShortcuts" => f.category_shortcuts = flag()?,
-                "quality" => f.quality = Quality::parse(&value).ok_or("unknown quality")?,
-                "cookieBrowser" => {
-                    f.cookie_browser = beep_core::CookieBrowser::ALL
-                        .into_iter()
-                        .find(|b| b.arg().unwrap_or("none") == value)
-                        .ok_or("unknown browser")?
-                }
-                _ => return Err(format!("unknown setting {key}")),
-            }
-            Ok(())
-        };
-        manager().update_settings(|s| {
-            if let Err(e) = apply(s) {
-                err = Some(e);
-            }
-        });
-        err.map_or(Ok(()), Err)
+        manager().set_setting(&key, &value)
     }
 
     /// Where yt-dlp and FFmpeg are, as JSON `{ytdlp, ffmpeg}` (null when missing).

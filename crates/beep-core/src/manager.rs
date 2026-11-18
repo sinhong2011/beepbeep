@@ -52,7 +52,7 @@ impl Store {
 // ---------------------------------------------------------------------------------------------
 // Public API
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
 pub enum Event {
     Finished(DownloadTask),
     Failed(DownloadTask),
@@ -134,6 +134,14 @@ impl Manager {
         let m = Manager { inner };
         m.inner.pump();
         m
+    }
+
+    /// Runs `f` on the service's runtime (the control socket lives there).
+    pub fn spawn<F>(&self, f: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        self.inner.rt.spawn(f);
     }
 
     pub fn snapshot(&self) -> Snapshot {

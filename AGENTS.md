@@ -44,11 +44,14 @@ cd app && nsh package App.tsx --target macos   # .nsh/out/BeepBeep.app
 
 `beep mcp` speaks the Model Context Protocol over stdio. Tools: `add_download`, `list_downloads`,
 `get_download`, `pause_download`, `resume_download`, `remove_download` (destructive with
-`delete_file`), `resolve_link`, `get_status`. It keeps its own queue in
-`~/Library/Application Support/BeepBeep/agent` unless `--state DIR` is given.
+`delete_file`), `resolve_link`, `get_status`. It shares the user's one queue with the desktop app:
+the first BeepBeep process to start owns the queue and serves it on a private local socket
+(`crate::service`), the others attach, and an attached process takes over if the owner quits. So
+what an assistant adds shows up in the window live. `--state DIR` gives a private queue instead;
+`BEEPBEEP_DATA_DIR` moves the whole data folder (useful for tests).
 
 ```json
-{ "mcpServers": { "beepbeep": { "command": "/path/to/beep", "args": ["mcp", "-o", "~/Downloads/BeepBeep"] } } }
+{ "mcpServers": { "beepbeep": { "command": "/path/to/beep", "args": ["mcp"] } } }
 ```
 
 Scripts can use `--json` on `beep get | list | resolve | probe` (progress on stderr, one JSON

@@ -6,7 +6,7 @@ mod mcp;
 
 use beep_core::providers::ResolverChain;
 use beep_core::util::{fmt_bytes, fmt_duration, fmt_speed, redact_url};
-use beep_core::{Manager, Quality, Settings, Store, TaskStatus};
+use beep_core::{Manager, Quality, Role, Service, Settings, Store, TaskStatus};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -18,7 +18,8 @@ USAGE
   beep list [--state DIR] [--json]   Show the queue kept in DIR
   beep resolve <url>... [--json]     Show the videos and formats of X, Threads and Instagram posts
   beep probe <url> [--json]          Show size, range support and validators
-  beep mcp [--state DIR] [-o DIR]    Serve the queue to AI assistants over MCP (stdio)
+  beep mcp [--state DIR [-o DIR]]    Serve the queue to AI assistants over MCP (stdio); shares the
+                                     app's queue unless --state gives a private one
 
 With --json, progress goes to stderr and one JSON document to stdout.
 
@@ -57,15 +58,27 @@ fn main() {
         "resolve" => resolve(&a.0, json),
         "probe" => probe(&a.0, json),
         "mcp" => {
-            // Its own queue by default, so it never races the desktop app over one file.
-            let store = Store::at(a.opt("--state").map(PathBuf::from).unwrap_or_else(|| beep_core::util::data_dir().join("agent")));
-            let mut s = None;
-            if let Some(dir) = a.opt("-o") {
-                let mut st = Settings::default();
-                st.download_dir = PathBuf::from(dir);
-                s = Some(st);
-            }
-            mcp::serve(store, s)
+            // The user's one queue, shared with the desktop app (attached when it runs, owned otherwise);
+            // `--state DIR` gives a private queue instead.
+            // `-o` sets the folder of a private queue only: the shared queue keeps the user's own setting.
+            let folder = a.opt("-o");
+            let service = match a.opt("--state") {
+                Some(dir) => {
+                    let s = Service::private(Manager::new(Store::at(dir), None));
+                    if let Some(f) = &folder {
+                        let _ = s.set_setting("folder", f);
+                    }
+                    s
+                }
+                None => {
+                    if folder.is_some() {
+                        eprintln!("beep mcp: -o applies only with --state; the shared queue uses BeepBeep's download folder");
+                    }
+                    Service::connect_or_start(beep_core::util::data_dir(), None)
+                }
+            };
+            eprintln!("beep mcp: {}", match service.role() { Role::Owner => "serving the queue", Role::Client => "attached to the running BeepBeep" });
+            mcp::serve(service)
         }
         _ => {
             println!("{USAGE}");
@@ -76,10 +89,15 @@ fn main() {
 }
 
 fn list(a: &mut Args, json: bool) -> i32 {
-    let store = a.opt("--state").map(Store::at).unwrap_or_else(beep_core::default_store);
-    let m = Manager::new(store, None);
-    m.pause_all(); // look, don't touch: an inspection never starts downloads
-    let tasks = m.snapshot().tasks;
+    // The live queue (the running app's, if any); `--state DIR` reads a saved one without running it.
+    let tasks = match a.opt("--state") {
+        Some(dir) => Store::at(dir).load::<Vec<beep_core::DownloadTask>>("tasks.json").unwrap_or_default(),
+        // Attach to a running owner; with none, read the saved queue (listing never starts downloads).
+        None => match Service::connect(&beep_core::util::data_dir()) {
+            Some(s) => s.snapshot().tasks,
+            None => beep_core::default_store().load::<Vec<beep_core::DownloadTask>>("tasks.json").unwrap_or_default(),
+        },
+    };
     if json {
         println!("{}", serde_json::to_string_pretty(&tasks.iter().map(|t| mcp::summary(t, false)).collect::<Vec<_>>()).unwrap());
     } else {

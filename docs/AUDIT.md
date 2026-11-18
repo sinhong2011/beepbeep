@@ -78,8 +78,9 @@ Direct MP4 results go through the segmented engine, so they get resume and multi
 - M3: fault-injection CI (the `scripts/rangeserver.py` scenarios as XCTest), per-host adaptive caps, SQLite store.
 - M4: browser extension + native-messaging host; Link Collector rules (rename/destination templates).
 - M5: librqbit torrent adapter spike, then the playback coordinator (§39–40).
-- M6: a headless service with an authenticated local API. The MCP server exists (`beep mcp`); next it
-  should attach to the desktop app's running service instead of keeping its own queue.
+- M6: done locally: one queue per user, owned by the first BeepBeep process and served on a private
+  Unix socket (mode 0600) that the app, the CLI and `beep mcp` share, with takeover when the owner
+  quits. Next: remote access with pairing and scoped tokens over TLS (§27), and a Windows named pipe.
 
 ## 5. Licensing
 The project is AGPL-3.0-or-later (§28). No MDM, Motrix or VideoDown code is copied: the engine is written independently from RFC 9110 range semantics. yt-dlp (Unlicense) and FFmpeg (LGPL/GPL) are invoked as separate programs and are not bundled.

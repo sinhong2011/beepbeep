@@ -5,15 +5,14 @@
 
 use beep_core::providers::ResolverChain;
 use beep_core::util::{fmt_bytes, fmt_eta, fmt_speed};
-use beep_core::{DownloadTask, Manager, Quality, Settings, Store, TaskStatus};
+use beep_core::{DownloadTask, Quality, Service, TaskStatus};
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 
 const PROTOCOL: &str = "2025-06-18";
 
-pub fn serve(store: Store, settings: Option<Settings>) -> i32 {
-    let m = Manager::new(store, settings);
-    m.resume_all();
+pub fn serve(m: Service) -> i32 {
+    let m = &m;
     let rt = tokio::runtime::Runtime::new().expect("runtime");
     let stdin = std::io::stdin();
     let mut out = std::io::stdout();
@@ -23,7 +22,7 @@ pub fn serve(store: Store, settings: Option<Settings>) -> i32 {
             continue;
         }
         let reply = match serde_json::from_str::<Value>(&line) {
-            Ok(msg) => handle(&m, &rt, &msg),
+            Ok(msg) => handle(m, &rt, &msg),
             Err(e) => Some(error(Value::Null, -32700, &format!("parse error: {e}"))),
         };
         if let Some(r) = reply {
@@ -43,7 +42,7 @@ fn ok(id: Value, result: Value) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
 }
 
-fn handle(m: &Manager, rt: &tokio::runtime::Runtime, msg: &Value) -> Option<Value> {
+fn handle(m: &Service, rt: &tokio::runtime::Runtime, msg: &Value) -> Option<Value> {
     let id = msg.get("id").cloned();
     let method = msg["method"].as_str().unwrap_or("");
     // Notifications (no id) get no reply.
@@ -159,11 +158,11 @@ pub fn summary(t: &DownloadTask, detail: bool) -> Value {
     v
 }
 
-fn find(m: &Manager, id: &str) -> Result<DownloadTask, String> {
+fn find(m: &Service, id: &str) -> Result<DownloadTask, String> {
     m.snapshot().tasks.into_iter().find(|t| t.id.to_string() == id).ok_or_else(|| format!("no download with id {id}"))
 }
 
-fn call(m: &Manager, rt: &tokio::runtime::Runtime, name: &str, a: &Value) -> Result<Value, String> {
+fn call(m: &Service, rt: &tokio::runtime::Runtime, name: &str, a: &Value) -> Result<Value, String> {
     let id = || a["id"].as_str().ok_or("missing id").map(str::to_owned);
     match name {
         "add_download" => {

@@ -128,6 +128,30 @@ impl Default for Settings {
     }
 }
 
+impl Settings {
+    /// Changes one setting by its name (as the UI and the control socket name them).
+    pub fn set(&mut self, key: &str, value: &str) -> Result<(), String> {
+        let num = || value.parse::<f64>().map_err(|_| format!("not a number: {value}"));
+        let flag = || value == "true";
+        match key {
+            "folder" => self.download_dir = value.into(),
+            "maxConcurrent" => self.max_concurrent = num()?.clamp(1.0, 10.0) as usize,
+            "connections" => self.connections_per_task = num()?.clamp(1.0, 32.0) as usize,
+            "speedLimit" => self.speed_limit = num()?.max(0.0) as u64,
+            "notify" => self.notify = flag(),
+            "verifySha256" => self.verify_sha256 = flag(),
+            "categoryShortcuts" => self.category_shortcuts = flag(),
+            "quality" => self.quality = Quality::parse(value).ok_or("unknown quality")?,
+            "cookieBrowser" => {
+                self.cookie_browser =
+                    CookieBrowser::ALL.into_iter().find(|b| b.arg().unwrap_or("none") == value).ok_or("unknown browser")?
+            }
+            _ => return Err(format!("unknown setting {key}")),
+        }
+        Ok(())
+    }
+}
+
 /// External tool discovery (plan §14).
 pub fn find_tool(name: &str, override_path: &str) -> Option<PathBuf> {
     let expand = |p: &str| -> PathBuf {

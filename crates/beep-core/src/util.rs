@@ -197,7 +197,11 @@ pub fn default_download_dir() -> PathBuf {
     dirs::download_dir().or_else(dirs::home_dir).unwrap_or_else(|| PathBuf::from(".")).join("BeepBeep")
 }
 
+/// Where the queue and settings live: `BEEPBEEP_DATA_DIR`, else the platform's data folder.
 pub fn data_dir() -> PathBuf {
+    if let Some(d) = std::env::var_os("BEEPBEEP_DATA_DIR").filter(|d| !d.is_empty()) {
+        return PathBuf::from(d);
+    }
     dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("BeepBeep")
 }
 
