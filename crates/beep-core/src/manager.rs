@@ -606,16 +606,22 @@ impl Inner {
                 TaskKind::Media => media_file_name(&t, probe.file_name.as_deref().and_then(|n| util::split_ext(n).1).as_deref()),
                 TaskKind::Http => util::sanitize(probe.file_name.as_deref().unwrap_or(&t.display_name), 180),
             };
-            let reserved: HashSet<String> =
-                self.state.lock().unwrap().tasks.iter().filter(|o| o.id != id).filter_map(|o| o.file_name.clone()).collect();
+            // Pick a free name and claim it under one lock: downloads probing at the same moment
+            // would otherwise each see the same name as free.
+            let mut st = self.state.lock().unwrap();
+            let reserved: HashSet<String> = st.tasks.iter().filter(|o| o.id != id).filter_map(|o| o.file_name.clone()).collect();
             let unique = util::unique_path(&t.directory, &name, &reserved, true);
             let fname = unique.file_name().unwrap().to_string_lossy().into_owned();
-            self.update(id, |t| {
-                if t.kind == TaskKind::Http {
-                    t.display_name = fname.clone();
+            if let Some(task) = st.tasks.iter_mut().find(|o| o.id == id) {
+                if task.kind == TaskKind::Http {
+                    task.display_name = fname.clone();
                 }
-                t.file_name = Some(fname);
-            });
+                task.file_name = Some(fname);
+                task.updated_ms = now_ms();
+            }
+            st.version += 1;
+            st.dirty = true;
+            drop(st);
         }
         let pv = probe.validators.clone();
         self.update(id, |t| {

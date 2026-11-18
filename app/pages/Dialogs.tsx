@@ -2,7 +2,7 @@
 // The modal sheets, each an `nsh/base` Dialog: a layer over the window that hears Escape and backdrop
 // presses natively. The card rises in from 0.97 while the backdrop fades.
 
-import { type JSX, Scroll, Text, View, createMotion, signal } from "nsh";
+import { type JSX, Scroll, Storage, Text, View, createMotion, setColorScheme, signal } from "nsh";
 import { Dialog, Input } from "nsh/base";
 import * as store from "../store";
 import { Enter, Glyph, IconButton, PrimaryButton, Segmented, Toggle, ToolButton, dialogIn, motion, riseIn } from "../components/ui";
@@ -75,10 +75,7 @@ function AddSheet() {
   const links = () => store.linksIn(draft());
   const submit = () => {
     const n = store.addLinks(draft(), quality());
-    if (n > 0) {
-      store.showDialog(null);
-      store.showToast(n === 1 ? "Download added." : `${n} downloads added.`);
-    }
+    if (n > 0) store.showDialog(null); // each download shows its own live toast
   };
   return (
     <View>
@@ -190,10 +187,30 @@ function Stepper(props: { label: string; value: string; onLess: () => void; onMo
   );
 }
 
+const APPEARANCES = [
+  { value: "system", label: "System" },
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+];
+const appearance = signal("system");
+Storage.getItem("appearance").then((a) => a && appearance.set(a)).catch(() => {});
+
 function General() {
   const s = () => store.settings();
   return (
     <View>
+      <Row title="Appearance" detail="Follow the system, or always light or dark.">
+        <Segmented
+          label="Appearance"
+          options={APPEARANCES}
+          value={appearance()}
+          onChange={(a) => {
+            appearance.set(a);
+            setColorScheme(a as "system" | "light" | "dark");
+            Storage.setItem("appearance", a).catch(() => {});
+          }}
+        />
+      </Row>
       <Row title="Download Folder" detail={s()?.folder ?? ""}>
         <ToolButton label="Change…" onPress={store.chooseFolder} />
       </Row>

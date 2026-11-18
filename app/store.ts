@@ -6,6 +6,7 @@
 import { Clipboard, LayoutAnimation, Notifications, batch, reduceMotion, signal } from "nsh";
 import { AlertDialog } from "nsh/base";
 import { Engine } from "beepbeep/native";
+import { toast } from "./components/kit";
 
 export type Status =
   | "queued" | "resolving" | "probing" | "downloading" | "retrying" | "merging" | "verifying"
@@ -90,7 +91,6 @@ const source = signal<Source>("any");
 const query = signal("");
 const dialog = signal<DialogName>(null);
 const inspectorHidden = signal(false);
-const toastSignal = signal<{ text: string; ok: boolean; key: number } | null>(null);
 const addDraft = signal("");
 
 const inView = (t: Task, v: View) =>
@@ -136,7 +136,16 @@ function sync() {
   if (events && events !== "[]") {
     for (const e of JSON.parse(events) as { kind: string; id: string; title: string; detail: string | null }[]) {
       const ok = e.kind === "finished";
-      showToast(ok ? `Downloaded “${e.title}”` : `Couldn't download “${e.title}”`, ok);
+      // The download's own toast (if it is still showing) turns into the result, in place.
+      toast({
+        id: e.id,
+        kind: ok ? "success" : "error",
+        title: ok ? "Downloaded" : "Download failed",
+        description: ok ? e.title : `${e.title}: ${e.detail ?? ""}`,
+        action: ok
+          ? { label: "Show", onPress: () => { const t = taskById(e.id); if (t) reveal(t); } }
+          : { label: "Retry", onPress: () => resume(e.id) },
+      });
       if (settingsSignal()?.notify) {
         Notifications.show({ id: e.id, title: ok ? "Download finished" : "Download failed", body: ok ? e.title : `${e.title}: ${e.detail ?? ""}` }).catch(() => {});
       }
@@ -167,7 +176,6 @@ export const currentSource = () => source();
 export const currentQuery = () => query();
 export const openDialog = () => dialog();
 export const inspectorOpen = () => !inspectorHidden() && selected() !== null;
-export const toast = () => toastSignal();
 export const draft = () => addDraft();
 export const settings = () => settingsSignal();
 export const totalSpeed = () => tasks().reduce((sum, t) => sum + (t.active ? t.speed : 0), 0);
@@ -227,12 +235,10 @@ export function showDialog(d: DialogName) {
   dialog.set(d);
 }
 
+let notice = 0;
+/** A short notice in the toast stack. */
 export function showToast(text: string, ok = true) {
-  const key = Date.now();
-  toastSignal.set({ text, ok, key });
-  setTimeout(() => {
-    if (toastSignal()?.key === key) toastSignal.set(null);
-  }, 3600);
+  toast({ id: `notice-${++notice}`, kind: ok ? "info" : "error", title: text });
 }
 
 /** Adds every link in `text`; returns how many. */
@@ -240,6 +246,11 @@ export function addLinks(text: string, quality = ""): number {
   glide();
   const ids = Engine.addLinks(text, quality);
   sync();
+  // One live toast per download (at most three), resolved in place when it finishes.
+  for (const id of ids.slice(0, 3)) {
+    const t = taskById(id);
+    toast({ id, kind: "loading", title: t?.isMedia ? "Finding the video…" : "Downloading…", description: t?.title ?? null });
+  }
   if (ids.length) {
     batch(() => {
       view.set("all");
@@ -319,6 +330,15 @@ export function reveal(t: Task) {
 
 export function copyLink(t: Task) {
   Clipboard.writeText(t.source).then(() => showToast("Link copied."));
+}
+
+/** Removes a download (the inline confirm already asked); with `trash`, its file goes to the Trash. */
+export async function removeTask(t: Task, trash: boolean) {
+  glide();
+  const path = Engine.remove(t.id, trash);
+  if (path) await Engine.trash(path).catch(() => {});
+  sync();
+  showToast(trash ? "Removed, and the file moved to the Trash." : "Removed from the list.");
 }
 
 /** Asks how to remove a download: from the list, or its file too. */

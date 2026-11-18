@@ -36,6 +36,20 @@ All interactive pieces are `nsh/base` elements styled in `app/components/ui.tsx`
 `AlertDialog` (remove confirmation), plus `List` (virtualized rows), `Image`, `Scroll`, and the app's
 own `Glyph` component (Rust, SVG line icons).
 
+### Expressive components (`app/components/kit.tsx`)
+
+Original NSH components; the interaction ideas (rolling digits, fan-out toasts, lid-lift delete)
+are common UI patterns, and none of their code comes from a component library.
+
+| Component | Where | Behaviour |
+|---|---|---|
+| `RollingNumber` | Throughput, counts, status bar | Each digit rolls to its new value in a faded window; places come and go with the number |
+| `ToastStack` / `toast()` | Bottom right | Status marks pop in; a download's "Downloading…" toast becomes "Downloaded" (Show) or "Download failed" (Retry) in place; the stack fans out on hover; close on hover |
+| `ConfirmBin` | Inspector | The lid lifts; a panel slides out with ✓ (remove), "+ Trash file" and ✕; Escape backs out |
+| `FolderButton` | Inspector | Show in Finder: the folder's front tips open and a page rises on hover |
+| `SwingGlyph` | Sidebar, Completed | Swings like a bell when a download completes, harder when several land quickly |
+| Appearance | Settings › General | System / Light / Dark on the sliding Segmented pill, remembered |
+
 ## Tokens
 
 Colors live only in `app/theme.json`: shadcn's roles (background, foreground, primary, muted, border…)
@@ -68,7 +82,11 @@ ease-in leaving, a soft settle `cubic-bezier(0.22, 1, 0.36, 1)` for presses.
 | Link bar recognizes a link | Border colours to primary; kind label fades in, fast | Same |
 | Dialog opens / closes | Backdrop fades; card rises 10 pt from 0.97, slow; leaves with the dialog's fade | Instant |
 | Settings section changes | Pane rises 4 pt and fades in, fast | Instant |
-| Toast | Slides 24 pt up from the bottom edge and fades, slow | Instant |
+| Toast | Rises 28 pt from 0.94 and fades, slow; a status change pops the new mark in; the stack fans out on hover | Instant |
+| Numbers change (speed, counts) | Digits roll in their windows, 500 ms soft settle | Instant |
+| Remove | Bin lid lifts and tilts; confirm panel slides out 8 pt from 0.94 | Instant |
+| Show in Finder hover | Folder front tips open, a page rises 4 pt | Instant |
+| A download completes | Completed's icon swings like a bell | Still |
 | Switch toggles | Thumb glides 18 pt on the soft settle; track colour fades | Instant |
 
 Checked in the running app on macOS: press, view change, rows arriving, progress, inspector, dialogs,

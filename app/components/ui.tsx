@@ -38,7 +38,7 @@ export const slideInRight: MotionSpec = {
 export const wave = (index: number) => riseIn(6, motion.base, Math.min(index, 10) * 30);
 
 /** Press feedback on a soft settle (Design Guides: "Layered feedback on controls"). */
-export const press = "transition duration-150 ease-[0.22,1,0.36,1] active:scale-[0.97] motion-reduce:active:scale-100";
+export const press = "transition duration-150 ease-[cubic-bezier(0.22,1,0.36,1)] active:scale-[0.97] motion-reduce:active:scale-100";
 
 export { Glyph };
 
@@ -131,7 +131,7 @@ export function Toggle(props: { label: string; checked: boolean; onChange: (chec
       accessibilityLabel={props.label}
       onChange={({ checked }) => props.onChange(checked)}
       trackClass="h-[26px] w-11 rounded-full bg-track p-[3px] transition-colors duration-200 checked:bg-primary"
-      thumbClass="size-5 rounded-full bg-white shadow-sm transition-transform duration-250 ease-[0.22,1,0.36,1] checked:translate-x-[18px]"
+      thumbClass="size-5 rounded-full bg-white shadow-sm transition-transform duration-250 ease-[cubic-bezier(0.22,1,0.36,1)] checked:translate-x-[18px]"
     />
   );
 }

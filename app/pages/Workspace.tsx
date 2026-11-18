@@ -12,6 +12,7 @@ import {
   Enter, Glyph, IconButton, PrimaryButton, ProgressBar, RoundButton, SectionLabel, StatusIcon, Thumb, ToolButton,
   motion, press, progressTone, riseIn, slideInRight, wave,
 } from "../components/ui";
+import { ConfirmBin, FolderButton, RollingNumber, SwingGlyph } from "../components/kit";
 
 export function Workspace() {
   return (
@@ -65,9 +66,17 @@ function Sidebar() {
               accessibilityLabel={v.label}
               class={`h-8 flex-row items-center gap-2.5 rounded-[9px] px-2.5 hover:bg-hover ${press}`}
             >
-              <Glyph name={v.glyph} size={16} iconClass={store.currentView() === v.id ? "text-primary" : "text-muted-foreground"} />
+              {/* Completed swings like a bell when a download lands in it. */}
+              <SwingGlyph
+                name={v.glyph}
+                size={16}
+                count={v.id === "done" ? store.viewCount("done") : 0}
+                iconClass={store.currentView() === v.id ? "text-primary" : "text-muted-foreground"}
+              />
               <Text class={`flex-1 text-sm font-medium ${store.currentView() === v.id ? "text-foreground" : "text-muted-foreground"}`}>{v.label}</Text>
-              <Text class="text-[11.5px] font-semibold tabular-nums text-ink-3">{store.viewCount(v.id) || ""}</Text>
+              <If when={store.viewCount(v.id) > 0}>
+                <RollingNumber text={String(store.viewCount(v.id))} size={11.5} weight="semibold" class="text-ink-3" />
+              </If>
             </Tab>
           ))}
         </Tabs>
@@ -111,7 +120,7 @@ function Throughput() {
           {store.runningCount() === 0 ? "Idle" : store.runningCount() === 1 ? "1 download running" : `${store.runningCount()} downloads running`}
         </Text>
       </View>
-      <Text class="text-[22px] font-bold tabular-nums text-foreground">{speed(store.totalSpeed())}</Text>
+      <RollingNumber text={speed(store.totalSpeed())} size={22} weight="bold" class="text-foreground" />
       <Text class="text-[11.5px] text-ink-3">
         {store.settings()?.speedLimit ? `Limited to ${store.settings()?.speedLimitText}` : "No speed limit"}
       </Text>
@@ -148,6 +157,7 @@ function Toolbar() {
         <Input
           value={store.currentQuery()}
           onChange={({ value }) => store.setQuery(value)}
+          accessibilityLabel="Search downloads"
           placeholder="Search downloads"
           class="flex-1 text-[12.5px] text-foreground"
         />
@@ -183,10 +193,7 @@ function LinkBar() {
   };
   const submit = () => {
     const n = store.addLinks(draft());
-    if (n > 0) {
-      draft.set("");
-      store.showToast(n === 1 ? "Download added." : `${n} downloads added.`);
-    }
+    if (n > 0) draft.set(""); // each download shows its own live toast
   };
   return (
     <View
@@ -197,6 +204,7 @@ function LinkBar() {
         value={draft()}
         onChange={({ value }) => draft.set(value)}
         onSubmit={submit}
+        accessibilityLabel="Link to download"
         placeholder="Paste a link to a file, or to a post on X, Threads or Instagram"
         class="flex-1 text-sm text-foreground"
       />
@@ -364,10 +372,14 @@ function InspectorBody(props: { id: string }) {
                 <Glyph name={store.primaryLabel(task()).glyph} size={14} iconClass="text-pill-foreground" />
                 <Text class="text-[12.5px] font-semibold text-pill-foreground">{store.primaryLabel(task()).label}</Text>
               </Button>
-              <IconButton glyph="folder" label="Show in Finder" size={36} onPress={() => store.reveal(task())} />
+              <FolderButton label="Show in Finder" onPress={() => store.reveal(task())} />
               <IconButton glyph="link" label="Copy link" size={36} onPress={() => store.copyLink(task())} />
               <IconButton glyph="stop" label="Stop" size={36} onPress={() => store.stop(task().id)} />
-              <IconButton glyph="trash" label="Remove" size={36} onPress={() => store.confirmRemove(task())} />
+              <ConfirmBin
+                label="Remove"
+                onConfirm={() => store.removeTask(task(), false)}
+                extra={task().fileExists ? { label: "+ Trash file", onPress: () => store.removeTask(task(), true) } : null}
+              />
             </View>
             <Divider />
             <Facts task={task} />
@@ -488,7 +500,10 @@ function note(t: Task): string {
 function StatusBar() {
   return (
     <View class="h-[30px] flex-row items-center gap-[18px] border-t border-line px-5">
-      <Stat glyph="download" text={`${speed(store.totalSpeed())} down`} />
+      <View class="flex-row items-center gap-1.5">
+        <Glyph name="download" size={13} iconClass="text-ink-3" />
+        <RollingNumber text={`${speed(store.totalSpeed())} down`} size={11.5} class="text-muted-foreground" />
+      </View>
       <Stat glyph="clock" text={`${store.runningCount()} running · ${store.queuedCount()} waiting`} />
       <View class="flex-1" />
       <Stat glyph="folder" text={`${store.settings()?.folder ?? ""} · ${store.settings()?.freeText ?? "—"} free`} />

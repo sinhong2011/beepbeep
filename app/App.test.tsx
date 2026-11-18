@@ -25,3 +25,9 @@ test("settings open in a dialog and close with Done", async () => {
   await app.press("Done");
   await app.waitUntil(() => !app.texts().includes("Download Folder"));
 });
+
+test("a notice shows in the toast stack", async () => {
+  const app = await open("App.tsx", { width: 1280, height: 800 });
+  await app.press("role:button[Paste from the clipboard]");
+  await app.waitFor("The clipboard has no links.");
+});
