@@ -93,4 +93,6 @@ class S(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
 
-S(("127.0.0.1", args.port), H).serve_forever()
+server = S(("127.0.0.1", args.port), H)
+print("ready", flush=True)  # bound and listening: tests wait for this line, not a fixed delay
+server.serve_forever()

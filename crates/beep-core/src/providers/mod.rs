@@ -6,9 +6,9 @@ mod meta;
 mod x;
 mod ytdlp;
 
-pub use meta::{InstagramProvider, MetaPage, ThreadsProvider, parse_meta_page};
+pub use meta::{InstagramProvider, MetaPage, ThreadsProvider, parse_meta_page, threads_hosts};
 pub use x::{XProvider, parse_syndication, x_token};
-pub use ytdlp::{YtDlp, YtDlpProgress};
+pub use ytdlp::{YtDlp, YtDlpProgress, classify_error as classify_ytdlp_error};
 
 use crate::domain::Platform;
 use crate::settings::{Quality, Settings, find_tool};
@@ -174,9 +174,27 @@ pub fn instagram_code(u: &url::Url) -> Option<String> {
     segs.get(i + 1).map(|s| s.to_string())
 }
 
+/// A share link (`threads.com/share/<id>`, `instagram.com/share/reel/<id>`): it redirects or points to
+/// a post, whose URL `expand_share_link` finds before resolving.
+pub fn share_link(u: &url::Url) -> Option<Platform> {
+    let h = host(u);
+    let segs = segments(u);
+    if segs.first() != Some(&"share") || segs.len() < 2 {
+        return None;
+    }
+    match h.as_str() {
+        "threads.net" | "threads.com" => Some(Platform::Threads),
+        "instagram.com" | "m.instagram.com" => Some(Platform::Instagram),
+        _ => None,
+    }
+}
+
 /// Which platform a post URL belongs to; `None` for anything else (treated as a direct file).
 pub fn classify(s: &str) -> Option<Platform> {
     let u = url::Url::parse(s).ok()?;
+    if let Some(p) = share_link(&u) {
+        return Some(p);
+    }
     let h = host(&u);
     if X_HOSTS.contains(&h.as_str()) && tweet_id(&u).is_some() {
         return Some(Platform::X);
@@ -190,10 +208,35 @@ pub fn classify(s: &str) -> Option<Platform> {
     None
 }
 
+/// The post a share link points to: the URL its redirects end at, else the page's canonical URL
+/// (`<link rel="canonical">` or `og:url`). Fails when neither is a post link.
+pub async fn expand_share_link(client: &reqwest::Client, s: &str) -> Result<String, ResolveError> {
+    let resp = meta::get_politely(client, s).await?;
+    let landed = resp.url().to_string();
+    if classify(&landed).is_some() && share_link(&url::Url::parse(&landed).map_err(|_| ResolveError::Unsupported)?).is_none() {
+        return Ok(landed);
+    }
+    let html = resp.text().await.map_err(|e| ResolveError::Failed(e.to_string()))?;
+    match canonical_url(&html) {
+        Some(c) if classify(&c).is_some() && url::Url::parse(&c).is_ok_and(|u| share_link(&u).is_none()) => Ok(c),
+        _ => Err(ResolveError::Failed("Couldn't find the post this share link points to.".into())),
+    }
+}
+
+/// `<link rel="canonical" href>` or `og:url` of a page.
+pub fn canonical_url(html: &str) -> Option<String> {
+    let link = regex::Regex::new(r#"<link[^>]+rel=["']canonical["'][^>]*href=["']([^"']+)["']|<link[^>]+href=["']([^"']+)["'][^>]*rel=["']canonical["']"#).ok()?;
+    if let Some(c) = link.captures(html) {
+        return c.get(1).or(c.get(2)).map(|m| m.as_str().replace("&amp;", "&"));
+    }
+    meta::meta_content(html, "og:url").map(|s| s.replace("&amp;", "&"))
+}
+
 // ---------------------------------------------------------------------------------------------
 // Resolver chain
 
 pub struct ResolverChain {
+    client: reqwest::Client,
     native: Vec<Box<dyn VideoProvider>>,
     pub ytdlp: Option<YtDlp>,
     prefer_native: bool,
@@ -208,6 +251,7 @@ impl ResolverChain {
             cookies: settings.cookie_browser,
         });
         Self {
+            client: client.clone(),
             native: vec![
                 Box::new(XProvider { client: client.clone() }),
                 Box::new(ThreadsProvider { client: client.clone() }),
@@ -219,7 +263,12 @@ impl ResolverChain {
     }
 
     pub async fn resolve(&self, s: &str, mut log: impl FnMut(String)) -> Result<Vec<MediaItem>, ResolveError> {
-        let u = url::Url::parse(s).map_err(|_| ResolveError::Unsupported)?;
+        let mut u = url::Url::parse(s).map_err(|_| ResolveError::Unsupported)?;
+        if share_link(&u).is_some() {
+            let post = expand_share_link(&self.client, s).await?;
+            log(format!("Share link points to {post}"));
+            u = url::Url::parse(&post).map_err(|_| ResolveError::Unsupported)?;
+        }
         let native = self.native.iter().find(|p| p.can_handle(&u)).map(|p| p.as_ref());
         let yt = self.ytdlp.as_ref().map(|y| y as &dyn VideoProvider);
         let order: Vec<&dyn VideoProvider> =
@@ -236,8 +285,10 @@ impl ResolverChain {
                 }
                 Err(e) => {
                     log(format!("{}: {e}", p.name()));
-                    // Keep the most useful error: a native "no video" is less useful than a yt-dlp detail.
-                    if first.is_none() || first == Some(ResolveError::NoVideo) {
+                    // Keep the most useful error: "no video" or "needs a login" say less than a rate limit
+                    // or yt-dlp's own detail, which a later provider may give.
+                    let vague = matches!(first, None | Some(ResolveError::NoVideo) | Some(ResolveError::LoginRequired(_)));
+                    if vague && !(first.is_some() && matches!(e, ResolveError::NoVideo)) {
                         first = Some(e);
                     }
                 }

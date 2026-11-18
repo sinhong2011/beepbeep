@@ -6,7 +6,8 @@
 
 - MCP server: run `beep mcp` over stdio. It shares the user's queue with the BeepBeep window (downloads it adds appear there live). Tools: add_download(urls[], quality?), list_downloads(filter?, limit?), get_download(id), pause_download(id), resume_download(id), remove_download(id, delete_file?) [destructive], resolve_link(url), get_status().
 - CLI: `beep get <url>... --json`, `beep list --json`, `beep resolve <url> --json`, `beep probe <url> --json`.
-- Accepted links: direct http(s) files; x.com / twitter.com `/status/<id>`; threads.net / threads.com `/@user/post/<code>`; instagram.com `/p/`, `/reel/`, `/reels/`, `/tv/`.
+- Accepted links: direct http(s) files; x.com / twitter.com `/status/<id>`; threads.net / threads.com `/@user/post/<code>` and `/share/<id>`; instagram.com `/p/`, `/reel/`, `/reels/`, `/tv/` and `/share/…` (share links are followed to their post).
+- Rate limits: Threads and Instagram limit requests by network; BeepBeep waits as `Retry-After` asks, retries twice, then reports "The platform is limiting requests" rather than working around the limit.
 - Quality: best, 1080, 720, 480, audio (the highest rendition at or under the cap).
 - Public posts need no account. Posts that need a login use yt-dlp with the user's chosen browser cookies; BeepBeep never bypasses DRM, paywalls or private accounts.
 

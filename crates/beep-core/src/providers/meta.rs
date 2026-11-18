@@ -114,21 +114,39 @@ fn decode_entities(s: &str) -> String {
     s.replace("&amp;", "&")
 }
 
-async fn fetch_html(client: &Client, url: &str) -> Result<String, ResolveError> {
-    let resp = client
-        .get(url)
-        .header("Accept", "text/html,application/xhtml+xml")
-        .header("Accept-Language", "en-US,en;q=0.9")
-        .header("Sec-Fetch-Mode", "navigate")
-        .send()
-        .await
-        .map_err(|e| ResolveError::Failed(crate::engine::EngineError::from(e).to_string()))?;
-    match resp.status().as_u16() {
-        200..=299 => resp.text().await.map_err(|e| ResolveError::Failed(e.to_string())),
-        404 | 410 => Err(ResolveError::NotFound),
-        429 => Err(ResolveError::RateLimited),
-        c => Err(ResolveError::Failed(format!("HTTP {c}"))),
+/// A page request that respects the platform's rate limit: on HTTP 429 it waits as `Retry-After`
+/// asks (at most 8 s; 1 s, then 3 s without one) and tries twice more, then reports `RateLimited`.
+/// It never disguises itself to get past a limit.
+pub async fn get_politely(client: &Client, url: &str) -> Result<reqwest::Response, ResolveError> {
+    let mut waits = [1u64, 3].into_iter();
+    loop {
+        let resp = client
+            .get(url)
+            .header("Accept", "text/html,application/xhtml+xml")
+            .header("Accept-Language", "en-US,en;q=0.9")
+            .send()
+            .await
+            .map_err(|e| ResolveError::Failed(crate::engine::EngineError::from(e).to_string()))?;
+        match resp.status().as_u16() {
+            200..=299 => return Ok(resp),
+            404 | 410 => return Err(ResolveError::NotFound),
+            429 => {
+                let asked = resp.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok());
+                let Some(default) = waits.next() else { return Err(ResolveError::RateLimited) };
+                tokio::time::sleep(std::time::Duration::from_secs(asked.unwrap_or(default).min(8))).await;
+            }
+            c => return Err(ResolveError::Failed(format!("HTTP {c}"))),
+        }
     }
+}
+
+async fn fetch_html(client: &Client, url: &str) -> Result<String, ResolveError> {
+    get_politely(client, url).await?.text().await.map_err(|e| ResolveError::Failed(e.to_string()))
+}
+
+/// The `content` of a `<meta property|name=…>` tag.
+pub fn meta_content(html: &str, property: &str) -> Option<String> {
+    meta(html, property)
 }
 
 pub struct ThreadsProvider {
@@ -145,24 +163,48 @@ impl VideoProvider for ThreadsProvider {
     fn resolve<'a>(&'a self, url: &'a url::Url) -> ResolveFuture<'a> {
         Box::pin(async move {
             let code = threads_code(url).ok_or(ResolveError::Unsupported)?;
-            let html = fetch_html(&self.client, url.as_str()).await?;
-            let page = parse_meta_page(&html);
-            if page.videos.is_empty() {
-                return Err(if page.title.is_none() { ResolveError::LoginRequired(Platform::Threads) } else { ResolveError::NoVideo });
+            // threads.com and threads.net serve the same posts: if one host refuses, ask the other.
+            let mut last = ResolveError::RateLimited;
+            for candidate in threads_hosts(url) {
+                let html = match fetch_html(&self.client, &candidate).await {
+                    Ok(h) => h,
+                    Err(e @ (ResolveError::RateLimited | ResolveError::Failed(_))) => {
+                        last = e;
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                };
+                let page = parse_meta_page(&html);
+                if page.videos.is_empty() {
+                    return Err(if page.title.is_none() { ResolveError::LoginRequired(Platform::Threads) } else { ResolveError::NoVideo });
+                }
+                return Ok(vec![MediaItem {
+                    id: format!("threads-{code}"),
+                    platform: Platform::Threads,
+                    page_url: url.to_string(),
+                    title: page.title,
+                    author: page.author,
+                    thumbnail: page.thumbnail,
+                    duration: None,
+                    formats: page.videos,
+                    resolved_by: "threads-page",
+                }]);
             }
-            Ok(vec![MediaItem {
-                id: format!("threads-{code}"),
-                platform: Platform::Threads,
-                page_url: url.to_string(),
-                title: page.title,
-                author: page.author,
-                thumbnail: page.thumbnail,
-                duration: None,
-                formats: page.videos,
-                resolved_by: "threads-page",
-            }])
+            Err(last)
         })
     }
+}
+
+/// The post on its own host, then on the other Threads host.
+pub fn threads_hosts(url: &url::Url) -> Vec<String> {
+    let mut out = vec![url.to_string()];
+    let host = url.host_str().unwrap_or("");
+    let other = if host.ends_with("threads.net") { host.replace("threads.net", "threads.com") } else { host.replace("threads.com", "threads.net") };
+    let mut alt = url.clone();
+    if other != host && alt.set_host(Some(&other)).is_ok() {
+        out.push(alt.to_string());
+    }
+    out
 }
 
 pub struct InstagramProvider {
@@ -181,9 +223,17 @@ impl VideoProvider for InstagramProvider {
             let code = instagram_code(url).ok_or(ResolveError::Unsupported)?;
             let page_url = format!("https://www.instagram.com/p/{code}/");
             let mut best: Option<MetaPage> = None;
+            let mut refused: Option<ResolveError> = None;
             // The post page first, then its public embed page.
             for candidate in [page_url.clone(), format!("https://www.instagram.com/p/{code}/embed/captioned/")] {
-                let Ok(html) = fetch_html(&self.client, &candidate).await else { continue };
+                let html = match fetch_html(&self.client, &candidate).await {
+                    Ok(h) => h,
+                    Err(ResolveError::NotFound) => return Err(ResolveError::NotFound),
+                    Err(e) => {
+                        refused = Some(e);
+                        continue;
+                    }
+                };
                 let page = parse_meta_page(&html);
                 let found = !page.videos.is_empty();
                 if best.is_none() || found {
@@ -193,7 +243,11 @@ impl VideoProvider for InstagramProvider {
                     break;
                 }
             }
-            let page = best.filter(|p| !p.videos.is_empty()).ok_or(ResolveError::LoginRequired(Platform::Instagram))?;
+            // Say why: a rate limit or a server error is not "needs a login".
+            let page = match best.filter(|p| !p.videos.is_empty()) {
+                Some(p) => p,
+                None => return Err(refused.unwrap_or(ResolveError::LoginRequired(Platform::Instagram))),
+            };
             Ok(vec![MediaItem {
                 id: format!("ig-{code}"),
                 platform: Platform::Instagram,

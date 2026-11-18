@@ -28,15 +28,21 @@ pub struct YtDlpProgress {
 }
 
 impl YtDlp {
-    fn command(&self) -> Command {
-        let mut c = Command::new(&self.path);
-        c.arg("--no-warnings").arg("--no-playlist");
+    /// The arguments every yt-dlp run gets. Browser cookies only when the user chose a browser.
+    pub fn base_args(&self) -> Vec<String> {
+        let mut a = vec!["--no-warnings".to_owned(), "--no-playlist".to_owned()];
         if let Some(b) = self.cookies.arg() {
-            c.arg("--cookies-from-browser").arg(b);
+            a.extend(["--cookies-from-browser".to_owned(), b.to_owned()]);
         }
         if let Some(f) = &self.ffmpeg {
-            c.arg("--ffmpeg-location").arg(f);
+            a.extend(["--ffmpeg-location".to_owned(), f.display().to_string()]);
         }
+        a
+    }
+
+    fn command(&self) -> Command {
+        let mut c = Command::new(&self.path);
+        c.args(self.base_args());
         c.kill_on_drop(true).stdin(Stdio::null());
         c
     }

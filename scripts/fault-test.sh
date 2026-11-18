@@ -9,7 +9,12 @@ WORK="${1:-$(mktemp -d)}"
 PORT=$(python3 -c "import socket; s=socket.socket(); s.bind((\"127.0.0.1\", 0)); print(s.getsockname()[1])")
 pass=0; fail=0
 
-server() { python3 "$ROOT/scripts/rangeserver.py" --port $PORT "$@" > "$WORK/server.log" 2>&1 & SRV=$!; sleep 0.8; }
+# Starts the server and waits until it listens (generating the test file can take a while on a busy machine).
+server() {
+  python3 "$ROOT/scripts/rangeserver.py" --port $PORT "$@" > "$WORK/server.log" 2>&1 & SRV=$!
+  for _ in $(seq 1 100); do grep -q '^ready' "$WORK/server.log" 2>/dev/null && return; sleep 0.1; done
+  echo "server did not start"; cat "$WORK/server.log"
+}
 stop_server() { kill $SRV 2>/dev/null; wait $SRV 2>/dev/null; }
 served_sha() { grep -o '[0-9a-f]\{64\}' "$WORK/server.log" | tail -1; }
 # Runs beep with a watchdog so a hang fails the scenario instead of blocking.
